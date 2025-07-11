@@ -1,0 +1,128 @@
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: ecommerce-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: microservice_ecomerce_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d microservice_ecomerce_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ecommerce-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  backend-api:
+    container_name: backend-api
+    build:
+      context: ../_ecommerce_microservice_api/ecommerce-backend
+      dockerfile: Dockerfile
+    command: /app/api
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=microservice_ecomerce_db
+      - DB_PORT=5432
+      - REDIS_ADDR=redis:6379
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/sync-product-to-directus
+    depends_on:
+      - postgres
+      - redis
+    restart: on-failure
+
+  backend-worker:
+    container_name: backend-worker
+    build:
+      context: ../_ecommerce_microservice_api/ecommerce-backend
+      dockerfile: Dockerfile
+    command: /app/worker
+    environment:
+      - DB_HOST=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=microservice_ecomerce_db
+      - DB_PORT=5432
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - postgres
+      - redis
+    restart: on-failure
+  
+
+  directus:
+    image: directus/directus:latest
+    container_name: ecommerce-directus
+    ports:
+      - "8055:8055"
+    environment:
+      - KEY=a-strong-random-key
+      - SECRET=a-stronger-random-secret
+      - DB_CLIENT=pg
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=microservice_ecomerce_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - ADMIN_EMAIL=admin@example.com
+      - ADMIN_PASSWORD=password
+      - WEBSOCKETS_ENABLED=true
+      - CORS_ENABLED=true
+      - CORS_ORIGIN=http://127.0.0.1:8000,http://localhost:8000,http://localhost:5173
+    depends_on:
+      - postgres
+      - redis
+
+
+  n8n:
+    image: n8nio/n8n
+    container_name: ecommerce-n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Jakarta
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ecommerce-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    depends_on:
+      - backend-api
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ecommerce-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  n8n_data:
+  grafana_data:
